@@ -8,4 +8,4 @@ before-install:
     - "sudo apt-get -qq update"
 
 script:
-    - "make -C src tests"
+    - "make all"
