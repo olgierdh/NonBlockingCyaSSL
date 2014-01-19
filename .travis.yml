@@ -1,0 +1,11 @@
+language: c
+
+compiler:
+    - clang
+    - gcc
+
+before-install:
+    - "sudo apt-get -qq update"
+
+script:
+    - "make -C src tests"
