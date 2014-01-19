@@ -6,6 +6,7 @@ compiler:
 
 before-install:
     - "sudo apt-get -qq update"
+    - "git submodule update --init --recursive"
 
 script:
     - "make all"
