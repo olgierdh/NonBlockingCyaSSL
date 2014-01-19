@@ -1,4 +1,6 @@
-NonBlockingWolf
+NonBlockingCyaSSL
 ===============
 
-WolfSSL non-blocking test
+CyaSSL non-blocking test
+
+
