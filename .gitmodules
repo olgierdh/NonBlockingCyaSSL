@@ -1,0 +1,3 @@
+[submodule "imports/cyassl"]
+	path = imports/cyassl
+	url = https://github.com/cyassl/cyassl.git
