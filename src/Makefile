@@ -2,15 +2,24 @@ SRC=$(wildcard *.c)
 OBJ=$(addprefix ./obj/,$(SRC:.c=.o))
 EX=$(addprefix ./bin/,$(SRC:.c=))
 
+INCLUDE_DIRS := ../imports/cyassl/
+LIBRARY_DIRS := ../imports/cyassl/src/.libs/
+LIBRARIES := cyassl
+
+CFLAGS 	+= $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
+LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
+LDFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
+
+
 all: $(OBJ) $(EX)
 
 ./bin/% : %.c
 	@-mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(OBJ) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJ) -o $@
 
 ./obj/%.o : %.c
 	@-mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) -c $< -o $@
 
 clean:
 	rm -rf ./bin
