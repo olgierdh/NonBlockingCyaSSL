@@ -2,11 +2,12 @@ SRC=$(wildcard *.c)
 OBJ=$(addprefix ./obj/,$(SRC:.c=.o))
 EX=$(addprefix ./bin/,$(SRC:.c=))
 
-INCLUDE_DIRS := ../imports/cyassl/
-LIBRARY_DIRS := ../imports/cyassl/src/.libs/
+INCLUDE_DIRS := $(MAIN_DIR)/imports/cyassl/
+LIBRARY_DIRS := $(MAIN_DIR)/imports/cyassl/src/.libs/
 LIBRARIES := cyassl
 
 CFLAGS += -Wno-pragmas -Wall -Wno-strict-aliasing -Wextra -Wunknown-pragmas --param=ssp-buffer-size=1 -Waddress -Warray-bounds -Wbad-function-cast -Wchar-subscripts -Wcomment -Wfloat-equal -Wformat-security -Wformat=2 -Wmissing-field-initializers -Wmissing-noreturn -Wmissing-prototypes -Wnested-externs -Wnormalized=id -Woverride-init -Wpointer-arith -Wpointer-sign -Wredundant-decls -Wshadow -Wsign-compare -Wstrict-overflow=1 -Wswitch-enum -Wundef -Wunused -Wunused-result -Wunused-variable -Wwrite-strings -fwrapv
+CFLAGS += -g -O2
 
 LDIFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 LDLFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))

@@ -1,5 +1,10 @@
 .PHONY: all build_cyassl
 
+
+MAIN_DIR :=$(shell git rev-parse --show-toplevel)
+
+export MAIN_DIR
+
 all: examples
 
 build_cyassl:
