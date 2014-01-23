@@ -1,12 +1,11 @@
-.PHONY: all
+.PHONY: all build_cyassl
 
-all: build_cyassl
-	examples
+all: examples
 
 build_cyassl:
-	cd ./imports/cyassl && ./autogen.sh && ./configure && make && cd ../../
+	if [ -a ./imports/cyassl/Makefile ]; then make -C ./imports/cyassl/; else cd ./imports/cyassl && ./autogen.sh && ./configure && make && cd ../../; fi;
 
-examples:
+examples: build_cyassl
 	$(MAKE) -C src
 
 clean:
