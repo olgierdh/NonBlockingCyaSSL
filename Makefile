@@ -9,7 +9,7 @@ all: examples
 
 build_cyassl:
 	if [ -f ./imports/cyassl/Makefile ]; then make -C ./imports/cyassl/; else cd ./imports/cyassl && ./autogen.sh && ./configure && make && cd ../../; fi;
-	ls ./imports/cyassl/src/.libs/
+	ls -al ./imports/cyassl/src/.libs/
 
 examples: build_cyassl
 	$(MAKE) -C src
