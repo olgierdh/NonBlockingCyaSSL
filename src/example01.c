@@ -2,8 +2,20 @@
 #include <stdio.h>
 #include <cyassl/ssl.h>
 
+/**
+ * \struct SSLCertConfig_t
+ * \brief  This structure shall hold data related via the loading function
+ *          should contain the information
+ */
+typedef struct
+{
+    const char* path;
+    const char* file;
+} SSLCertConfig_t;
 
-
+//function prototypes
+CYASSL_CTX* init_cyaSSL( void );
+int load_certificate( CYASSL_CTX* cya_ctx, const SSLCertConfig_t* cert_config );
 
 /**
  * \brief   Initializes the cyassl library and creates the context
@@ -15,17 +27,6 @@ CYASSL_CTX* init_cyaSSL( void )
 
     return CyaSSL_CTX_new( CyaTLSv1_client_method() );
 }
-
-/**
- * \struct SSLCertConfig_t
- * \brief  This structure shall hold data related via the loading function
- *          should contain the information
- */
-typedef struct
-{
-    const char* path;
-    const char* file;
-} SSLCertConfig_t;
 
 /**
  * \brief   Loads the certificate defined through the SSLCertConfig_t
@@ -48,8 +49,11 @@ int load_certificate( CYASSL_CTX* cya_ctx, const SSLCertConfig_t* cert_config )
 /**
  * \main
  */
-int main( const int argc, const char* argv[] )
+int main( const int argc, const char** argv )
 {
+    ( void ) argc;
+    ( void ) argv;
+
     CYASSL_CTX* cyaSSLContext = 0;
     SSLCertConfig_t cert_config = { "ca-cert.pem", 0 };
 
