@@ -48,7 +48,7 @@ int load_certificate( CYASSL_CTX* cya_ctx, const SSLCertConfig_t* cert_config )
 /**
  * \main
  */
-int main( const char argc, const char* argv[] )
+int main( const int argc, const char* argv[] )
 {
     CYASSL_CTX* cyaSSLContext = 0;
     SSLCertConfig_t cert_config = { "ca-cert.pem", 0 };
