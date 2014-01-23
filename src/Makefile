@@ -6,9 +6,9 @@ INCLUDE_DIRS := ../imports/cyassl/
 LIBRARY_DIRS := ../imports/cyassl/src/.libs/
 LIBRARIES := cyassl
 
-CFLAGS 	+= $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
-LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
-LDFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
+LDIFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
+LDLFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
+LDLFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
 
 all: $(OBJ) $(EX) test-certs
 
@@ -18,11 +18,11 @@ test-certs:
 
 ./bin/% : %.c
 	@-mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJ) -o $@
+	$(CC) $(CFLAGS) $(LDLFLAGS) $(OBJ) -o $@
 
 ./obj/%.o : %.c
 	@-mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(LDFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(LDIFLAGS) -c $< -o $@
 
 clean:
 	rm -rf ./bin
