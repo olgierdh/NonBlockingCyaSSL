@@ -146,6 +146,8 @@ char* load_file_into_memory( const char* filename, size_t* size )
     assert( filename != 0 && "Filename must not be null!" );
     assert( size != 0 && "Pointer to size must not be null!" );
 
+    char* ret = 0;
+
     FILE* fp = fopen( filename, "r" );
 
     if( !fp ) { goto err_handling; }
@@ -154,7 +156,7 @@ char* load_file_into_memory( const char* filename, size_t* size )
     *size = ftell( fp );
     fseek( fp, 0, SEEK_SET );
 
-    char* ret = malloc( *size );
+    ret = malloc( *size );
 
     if( !ret ) { goto err_handling; }
 
