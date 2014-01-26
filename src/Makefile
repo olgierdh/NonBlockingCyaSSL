@@ -24,7 +24,8 @@ test-certs:
 
 ./bin/% : %.c
 	@-mkdir -p $(dir $@)
-	$(LIBTOOL) --mode=link --tag=CC $(CC) $(CFLAGS) $(OBJ) -o $@ $(LA_FILE)
+	#$(LIBTOOL) --mode=link --tag=CC $(CC) $(CFLAGS) $(OBJ) -o $@ $(LA_FILE)
+	$(CC) $(CFLAGS) $(LDIFLAGS) $(LDLFLAGS) $< -o $@
 
 ./obj/%.o : %.c
 	@-mkdir -p $(dir $@)
