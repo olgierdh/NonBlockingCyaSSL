@@ -38,6 +38,7 @@ CYASSL* connectSSL( CYASSL_CTX* cya_ctx, const Conn_t* conn );
 void print_usage( void );
 void __attribute__((noreturn)) DIE( const char msg[], CYASSL* cyaSSLObject );
 CYASSL* closeSSL( CYASSL* cyaSSLObject, Conn_t* conn );
+char* load_file_into_memory( const char* filename, size_t* size );
 
 /**
  * \brief   Initializes the cyassl library and creates the context
@@ -74,7 +75,8 @@ int load_certificate( CYASSL_CTX* cya_ctx, const SSLCertConfig_t* cert_config )
 }
 
 /**
- * \brief connects
+ * \brief   connects
+ * \return  CYASSL object if ok 0 otherway
  */
 CYASSL* connectSSL( CYASSL_CTX* cya_ctx, const Conn_t* conn )
 {
@@ -102,7 +104,7 @@ CYASSL* connectSSL( CYASSL_CTX* cya_ctx, const Conn_t* conn )
 
 void print_usage( void )
 {
-    printf( "Usage: example_01 <server_ip> <port>\n" );
+    printf( "Usage: example_01 <server_ip> <port> <filename>\n" );
 }
 
 void DIE( const char msg[], CYASSL* cyaSSLObject )
@@ -139,12 +141,36 @@ CYASSL* closeSSL( CYASSL* cyaSSLObject, Conn_t* conn )
     return 0;
 }
 
-static const char query[] = "GET /v2/feeds/2.csv?datastreams=3,4 HTTP/1.1\r\n"
-"Host: api.xively.com\r\n"
-"User-Agent: libxively_test_ssl_posix\r\n"
-"Accept: */*\r\n"
-"X-ApiKey: 1\r\n"
-"\r\n";
+char* load_file_into_memory( const char* filename, size_t* size )
+{
+    assert( filename != 0 && "Filename must not be null!" );
+    assert( size != 0 && "Pointer to size must not be null!" );
+
+    FILE* fp = fopen( filename, "r" );
+
+    if( !fp ) { goto err_handling; }
+
+    fseek( fp, 0, SEEK_END );
+    *size = ftell( fp );
+    fseek( fp, 0, SEEK_SET );
+
+    char* ret = malloc( *size );
+
+    if( !ret ) { goto err_handling; }
+
+    size_t read = fread( ret, 1, *size, fp );
+
+    if( read != *size ) { goto err_handling; }
+
+    fclose( fp );
+
+    return ret;
+
+err_handling:
+    if( ret ) { free( ret ); ret = 0; }
+    if( fp ) { fclose( fp ); fp = 0; }
+    return 0;
+}
 
 /**
  * \main
@@ -154,7 +180,7 @@ int main( const int argc, const char** argv )
     ( void ) argc;
     ( void ) argv;
 
-    if( argc != 3 )
+    if( argc != 4 )
     {
         print_usage();
         exit( 1 );
@@ -205,14 +231,24 @@ int main( const int argc, const char** argv )
         DIE( "CyaSSL could not connect properly!", 0 );
     }
 
-    len = CyaSSL_write( cyaSSLObject, query, strlen( query ) );
+    size_t size = 0;
+    char* buff  = load_file_into_memory( argv[ 3 ], &size );
 
-    if( len < ( int ) strlen( query ) )
+    if( buff == 0 )
+    {
+        DIE( "Could not load given file... \n", 0 );
+    }
+
+    len = CyaSSL_write( cyaSSLObject, buff, size );
+
+    free( buff );
+
+    if( len < ( int ) size )
     {
         DIE( "CyaSSL could not send data", cyaSSLObject );
     }
 
-    printf( "Sent: %d bytes of %zu\n", len, strlen( query ) );
+    printf( "Sent: %d bytes of %zu\n", len, size );
 
     len = CyaSSL_read( cyaSSLObject, resp, sizeof( resp ) );
 
