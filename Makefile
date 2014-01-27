@@ -8,7 +8,7 @@ export MAIN_DIR
 all: examples
 
 build_cyassl:
-	if [ -f ./imports/cyassl/Makefile ]; then make -C ./imports/cyassl/; else cd ./imports/cyassl && ./autogen.sh && ./configure --enable-static --disable-silent-rules --enable-shared=no && make && cd ../../; fi;
+	if [ -f ./imports/cyassl/Makefile ]; then make -C ./imports/cyassl/; else cd ./imports/cyassl && ./autogen.sh && ./configure --enable-static --enable-shared=no  && make && cd ../../; fi;
 
 examples: build_cyassl
 	$(shell export LD_LIBRARY_PATH=./imports/cyassl/src/.libs/:$LD_LIBRARY_PATH)
