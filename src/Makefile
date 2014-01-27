@@ -15,7 +15,7 @@ LDIFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 LDLFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
 LDLFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
 
-all: $(OBJ) $(EX) test-certs
+all: $(OBJ) $(EX)
 
 test-certs:
 	mkdir -p test-certs
