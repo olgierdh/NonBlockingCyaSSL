@@ -14,6 +14,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+// borrowed from libxively
+#include "xi_coroutine.h"
+
 /**
  * \struct SSLCertConfig_t
  * \brief  This structure shall hold data related via the loading function
@@ -80,7 +83,10 @@ inline static CYASSL* create_cyassl_object( CYASSL_CTX* cya_ctx, const Conn_t* c
     if( xCyaSSL_Object != NULL )
     {
         /* Associate the created CyaSSL object with the connected socket. */
-        CyaSSL_set_fd( xCyaSSL_Object, conn->sock_fd );
+        if( CyaSSL_set_fd( xCyaSSL_Object, conn->sock_fd ) != SSL_SUCCESS )
+        {
+            return 0;
+        }
 
         return xCyaSSL_Object;
     }
@@ -170,7 +176,7 @@ inline static int create_non_blocking_socket()
 
     if( fcntl( socket_fd, F_SETFL, flags | O_NONBLOCK ) == -1 ) return -1;
 
-    return 1;
+    return socket_fd;
 }
 
 inline static void set_cyassl_flags( CYASSL* cya_obj )
@@ -186,24 +192,137 @@ typedef enum event_type
     FD_CAN_WRITE
 } event_type_t;
 
-typedef int ( *handle_t )( int type, CYASSL* cya_obj, Conn_t* conn );
-
-static int connect_tcp( int type, CYASSL* cya_obj, Conn_t* conn, handle_t** handle )
+typedef enum wanted_event
 {
-    assert( handle != 0 && "handle pointer to pointer must not be null!" );
+    WANT_READ = 2,
+    WANT_WRITE
+} wanted_event_t;
+
+static int main_handle(
+                          short*        cs
+                        , CYASSL*       cya_obj
+                        , Conn_t*       conn
+                        , const char*   data
+                        , const size_t  data_size )
+{
     assert( cya_obj != 0 && conn != 0 && "cya_obj and conn must not be null at the same time!" );
 
-    if( connect( conn->sock_fd, ( struct sockaddr* ) &conn->endpoint_addr, sizeof( conn->endpoint_addr ) ) == 0 )
+    // locals that must exist through yields
+    static int      state               = 0;
+    static size_t   data_sent           = 0;
+    static char     recv_buffer[ 256 ]  = { '\0' };
+
+    BEGIN_CORO( *cs )
+
+    // restarted
+    state = SSL_SUCCESS;
+
+    // first part of the coroutine is about connecting to the endpoint
     {
-        return -1;
+        if( connect( conn->sock_fd, ( struct sockaddr* ) &conn->endpoint_addr, sizeof( conn->endpoint_addr ) ) == 0 )
+        {
+            EXIT( *cs, -1 );
+        }
     }
 
-    return 1;
-}
+    printf( "Connecting...\n" );
+    YIELD( *cs, ( int ) WANT_WRITE );
+    printf( "Connected! state = %d \n", state );
 
-static int connect_ssl( int type, CYASSL* cya_obj, Conn_t* conn, handle_t** handle )
-{
+    // part two is actually to do the ssl handshake
+    {
+        do
+        {
+            if( state == SSL_ERROR_WANT_READ )
+            {
+                YIELD( *cs, ( int ) WANT_READ );
+            }
 
+            if( state == SSL_ERROR_WANT_WRITE )
+            {
+                YIELD( *cs, ( int ) WANT_WRITE );
+            }
+
+            printf( "Connecting SSL...\n" );
+            int ret = CyaSSL_connect( cya_obj );
+            state   = CyaSSL_get_error( cya_obj, ret );
+            printf( "Connecting SSL state [%d]\n", state );
+
+        } while( state != SSL_SUCCESS && ( state == SSL_ERROR_WANT_READ || state == SSL_ERROR_WANT_WRITE ) );
+
+        // we've connected or failed
+        if( state != SSL_SUCCESS )
+        {
+            // something went wrong
+            EXIT( *cs, -1 );
+        }
+    }
+
+    // part three sending a message
+    {
+        data_sent = 0;
+
+        do
+        {
+            if( state == SSL_ERROR_WANT_READ )
+            {
+                YIELD( *cs, ( int ) WANT_READ );
+            }
+
+            if( state == SSL_ERROR_WANT_WRITE )
+            {
+                YIELD( *cs, ( int ) WANT_WRITE );
+            }
+
+            size_t offset       = data_size - data_sent;
+            size_t size_left    = data_size - offset;
+
+            int len             = CyaSSL_write( cya_obj, data + offset, size_left );
+            state               = CyaSSL_get_error( cya_obj, len );
+
+            if( len > 0 ) { data_sent += len; }
+        } while( state != SSL_SUCCESS && ( state == SSL_ERROR_WANT_READ || state == SSL_ERROR_WANT_WRITE ) );
+
+        if( state != SSL_SUCCESS )
+        {
+            EXIT( *cs, -1 );
+        }
+    }
+
+    // part four receive
+    {
+        do
+        {
+            if( state == SSL_ERROR_WANT_READ )
+            {
+                YIELD( *cs, ( int ) WANT_READ );
+            }
+
+            if( state == SSL_ERROR_WANT_WRITE )
+            {
+                YIELD( *cs, ( int ) WANT_WRITE );
+            }
+
+            int len     = CyaSSL_read( cya_obj, recv_buffer, sizeof( recv_buffer ) - 1 );
+            state       = CyaSSL_get_error( cya_obj, len );
+
+            recv_buffer[ len ] = '\0';
+            if( len > 0 )
+            {
+                printf( "%s", recv_buffer );
+            }
+
+        } while( state != SSL_SUCCESS && ( state == SSL_ERROR_WANT_READ || state == SSL_ERROR_WANT_WRITE ) );
+
+        if( state != SSL_SUCCESS )
+        {
+            EXIT( *cs, -1 );
+        }
+    }
+
+    RESTART( *cs, 0 );
+
+    END_CORO()
 }
 
 /**
@@ -220,6 +339,10 @@ int main( const int argc, const char** argv )
         exit( 1 );
     }
 
+    wanted_event_t wanted_event         = WANT_READ;
+
+    short cs                    = 0;
+
     CYASSL_CTX* cyaSSLContext   = 0;
     CYASSL*     cyaSSLObject    = 0;
 
@@ -233,8 +356,6 @@ int main( const int argc, const char** argv )
     FD_ZERO( &w_master_set );
     FD_ZERO( &r_working_set );
     FD_ZERO( &w_working_set );
-
-    int len                     = 0;
 
     // --------------------------- initialization ---------------------------------
 
@@ -273,49 +394,41 @@ int main( const int argc, const char** argv )
 
     // --------------------------- main non blocking event processing loop ---------------------------------
 
-    // start with
+    size_t  data_size   = 0;
+    char*   data        = load_file_into_memory( argv[ 3 ], &data_size );
+    if( data == 0 ) DIE( "Could not load given file... \n", 0 );
 
     // almost endless loop
     for( ; ; )
     {
+        printf( "main_handle...\n" );
+        int ret = main_handle( &cs, cyaSSLObject, &conn_desc, data, data_size );
+        printf( "main_handle done!\n" );
+
+        if( ret == -1 ) DIE( "error on main_handle...", cyaSSLObject );
+        if( ret ==  0 ) break;
+
+        wanted_event = ret;
+
         memcpy( &r_working_set, &r_master_set, sizeof( fd_set ) );
         memcpy( &w_working_set, &w_master_set, sizeof( fd_set ) );
 
-        int s_ret = select( max_fd + 1, &r_working_set, &w_working_set, NULL, &timeout );
+        printf( "select... [%d]\n", ( int ) wanted_event );
 
-        if( s_ret < 0 ) DIE( "error on select...", cyaSSLObject );
-        if( s_ret == 0 ) DIE( "timeout on select...", cyaSSLObject );
+        int s_ret = select(
+                  max_fd + 1
+                , wanted_event == WANT_READ ? &r_working_set : NULL
+                , wanted_event == WANT_WRITE ? &w_working_set : NULL
+                , NULL
+                , &timeout );
 
-        if( FD_ISSET( conn_desc.sock_fd, &r_working_set ) ) // ready to read
-        {
+        printf( "select done [%d]\n", s_ret );
 
-        }
-
-        if( FD_ISSET( conn_desc.sock_fd, &w_working_set ) ) // ready to write
-        {
-
-        }
+        if( s_ret < 0 )     DIE( "error on select...", cyaSSLObject );
+        if( s_ret == 0 )    DIE( "timeout on select...", cyaSSLObject );
     }
 
-    size_t size = 0;
-    char* buff  = load_file_into_memory( argv[ 3 ], &size );
-
-    if( buff == 0 ) DIE( "Could not load given file... \n", 0 );
-
-    len = CyaSSL_write( cyaSSLObject, buff, size );
-
-    free( buff );
-
-    if( len < ( int ) size ) DIE( "CyaSSL could not send data", cyaSSLObject );
-
-    printf( "Sent: %d bytes of %zu\n", len, size );
-
-    len = CyaSSL_read( cyaSSLObject, resp, sizeof( resp ) );
-
-    if( len <= 0 ) DIE( "CyaSSL could not receive data", cyaSSLObject );
-
-    printf( "Recv: %d bytes\n", len );
-    printf( "Resp: %s\n", resp );
+    free( data );
 
     cyaSSLObject = closeSSL( cyaSSLObject, &conn_desc );
     CyaSSL_CTX_free( cyaSSLContext ); cyaSSLContext = 0;
