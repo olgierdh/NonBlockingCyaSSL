@@ -210,6 +210,7 @@ static int main_handle(
     // locals that must exist through yields
     static int      state               = 0;
     static size_t   data_sent           = 0;
+    static size_t   data_recv           = 0;
     static char     recv_buffer[ 256 ]  = { '\0' };
 
     BEGIN_CORO( *cs )
@@ -245,8 +246,9 @@ static int main_handle(
 
             printf( "Connecting SSL...\n" );
             int ret = CyaSSL_connect( cya_obj );
-            state   = CyaSSL_get_error( cya_obj, ret );
-            printf( "Connecting SSL state [%d]\n", state );
+
+            state = ret <= 0 ? CyaSSL_get_error( cya_obj, ret ) : ret;
+            printf( "Connecting SSL state [%d][%d][%d]\n", state, ret, ( int ) SSL_SUCCESS );
 
         } while( state != SSL_SUCCESS && ( state == SSL_ERROR_WANT_READ || state == SSL_ERROR_WANT_WRITE ) );
 
@@ -264,27 +266,33 @@ static int main_handle(
 
         do
         {
-            if( state == SSL_ERROR_WANT_READ )
+            do
             {
-                YIELD( *cs, ( int ) WANT_READ );
-            }
+                if( state == SSL_ERROR_WANT_READ )
+                {
+                    YIELD( *cs, ( int ) WANT_READ );
+                }
 
-            if( state == SSL_ERROR_WANT_WRITE )
-            {
-                YIELD( *cs, ( int ) WANT_WRITE );
-            }
+                if( state == SSL_ERROR_WANT_WRITE )
+                {
+                    YIELD( *cs, ( int ) WANT_WRITE );
+                }
 
-            size_t offset       = data_size - data_sent;
-            size_t size_left    = data_size - offset;
+                size_t offset       = data_sent;
+                size_t size_left    = data_size - data_sent;
 
-            int len             = CyaSSL_write( cya_obj, data + offset, size_left );
-            state               = CyaSSL_get_error( cya_obj, len );
+                printf( "Sending SSL... data_size = [%zu], data_sent = [%zu]\n", data_size, data_sent );
+                int ret             = CyaSSL_write( cya_obj, data + offset, size_left );
+                state               = ret <= 0 ? CyaSSL_get_error( cya_obj, ret ) : SSL_SUCCESS;
+                printf( "Sending SSL state state = [%d], ret = [%d]\n", state, ret );
 
-            if( len > 0 ) { data_sent += len; }
+                if( ret > 0 ) { data_sent += ret; }
+            } while( data_sent < data_size && state == SSL_SUCCESS );
         } while( state != SSL_SUCCESS && ( state == SSL_ERROR_WANT_READ || state == SSL_ERROR_WANT_WRITE ) );
 
         if( state != SSL_SUCCESS )
         {
+            printf( "Exiting\n" );
             EXIT( *cs, -1 );
         }
     }
@@ -293,25 +301,29 @@ static int main_handle(
     {
         do
         {
-            if( state == SSL_ERROR_WANT_READ )
+            do
             {
-                YIELD( *cs, ( int ) WANT_READ );
-            }
+                if( state == SSL_ERROR_WANT_READ )
+                {
+                    YIELD( *cs, ( int ) WANT_READ );
+                }
 
-            if( state == SSL_ERROR_WANT_WRITE )
-            {
-                YIELD( *cs, ( int ) WANT_WRITE );
-            }
+                if( state == SSL_ERROR_WANT_WRITE )
+                {
+                    YIELD( *cs, ( int ) WANT_WRITE );
+                }
 
-            int len     = CyaSSL_read( cya_obj, recv_buffer, sizeof( recv_buffer ) - 1 );
-            state       = CyaSSL_get_error( cya_obj, len );
+                int ret     = CyaSSL_read( cya_obj, recv_buffer, sizeof( recv_buffer ) - 1 );
+                state       = ret <= 0 ? CyaSSL_get_error( cya_obj, ret ) : SSL_SUCCESS;
 
-            recv_buffer[ len ] = '\0';
-            if( len > 0 )
-            {
-                printf( "%s", recv_buffer );
-            }
-
+                if( ret > 0 )
+                {
+                    recv_buffer[ ret ] = '\0';
+                    printf( "<<<%s>>>", recv_buffer );
+                    printf( "Received SSL... size = [%d], state = [%d]\n", ret, state );
+                    data_recv = ret;
+                }
+            } while( data_recv == sizeof( recv_buffer ) - 1 && state == SSL_SUCCESS );
         } while( state != SSL_SUCCESS && ( state == SSL_ERROR_WANT_READ || state == SSL_ERROR_WANT_WRITE ) );
 
         if( state != SSL_SUCCESS )
