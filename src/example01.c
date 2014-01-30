@@ -95,8 +95,14 @@ CYASSL* connectSSL( CYASSL_CTX* cya_ctx, const Conn_t* conn )
             /* Associate the created CyaSSL object with the connected socket. */
             CyaSSL_set_fd( xCyaSSL_Object, conn->sock_fd );
 
+            if( CyaSSL_connect( xCyaSSL_Object ) != SSL_SUCCESS )
+            {
+                return 0;
+            }
+
             return xCyaSSL_Object;
         }
+
     }
 
     return 0;
