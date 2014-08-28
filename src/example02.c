@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <cyassl/ssl.h>
 
-#include <errno.h>
 #include <string.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -13,6 +13,8 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
+#include "debug.h"
 
 // borrowed from libxively
 #include "xi_coroutine.h"
@@ -58,10 +60,10 @@ inline static int load_certificate( CYASSL_CTX* cya_ctx, const SSLCertConfig_t* 
     assert( cert_config != 0 && "CyaSSL certificate configuration must not be null!" );
     assert( cert_config->file != 0 && "CyaSSL certificate filename must not be null!" );
 
-    printf( "Trying to load certificate: file %s at %s dir\n", cert_config->file, cert_config->path );
+    debug_fmt( "Trying to load certificate: file %s at %s dir", cert_config->file, cert_config->path );
     int ret = CyaSSL_CTX_load_verify_locations( cya_ctx, cert_config->file, 0 );
 
-    printf( "Ret: %d\n", ret );
+    debug_fmt( "Ret: %d", ret );
 
     if( ret < 0 )
     {
@@ -69,6 +71,75 @@ inline static int load_certificate( CYASSL_CTX* cya_ctx, const SSLCertConfig_t* 
     }
 
     return 1;
+}
+
+inline static int myPrivateRecv( CYASSL* ssl, char* buf, int sz, void* ctx )
+{
+    ( void ) ssl;
+    int recvd   = 0;
+    int errval  = 0;
+    int fd      = *( int* )ctx;
+
+    recvd = read( fd, buf, sz );
+
+    debug_fmt( "myPrivateRecv received - %d bytes", recvd );
+
+    if( recvd < 0 )
+    {
+        errval = errno;
+
+        debug_fmt( "errno: %d", errval );
+
+        if( errval == EAGAIN || errval == EWOULDBLOCK )
+        {
+            return CYASSL_CBIO_ERR_WANT_READ;
+        }
+        else
+        {
+            return CYASSL_CBIO_ERR_GENERAL;
+        }
+    }
+    else if( recvd == 0 )
+    {
+        return CYASSL_CBIO_ERR_CONN_CLOSE;
+    }
+
+    return recvd;
+}
+
+inline static int myPrivateSend( CYASSL* ssl, char* buf, int sz, void* ctx )
+{
+    ( void ) ssl;
+
+    int sent    = 0;
+    int errval  = 0;
+    int fd      = *( int* ) ctx;
+
+    sent = write( fd, buf, sz );
+
+    debug_fmt( "myPrivateSend sent - %d bytes", sent );
+
+    if( sent < 0 )
+    {
+        errval = errno;
+
+        debug_fmt( "errno: %d", errval );
+
+        if( errval == EAGAIN || errval == EWOULDBLOCK )
+        {
+            return CYASSL_CBIO_ERR_WANT_WRITE;
+        }
+        else if( errval == EPIPE )
+        {
+            return CYASSL_CBIO_ERR_CONN_CLOSE;
+        }
+        else
+        {
+            return CYASSL_CBIO_ERR_GENERAL;
+        }
+    }
+
+    return sent;
 }
 
 inline static CYASSL* create_cyassl_object( CYASSL_CTX* cya_ctx, const Conn_t* conn )
@@ -82,6 +153,9 @@ inline static CYASSL* create_cyassl_object( CYASSL_CTX* cya_ctx, const Conn_t* c
 
     if( xCyaSSL_Object != NULL )
     {
+        CyaSSL_SetIORecv( cya_ctx, myPrivateRecv );
+        CyaSSL_SetIOSend( cya_ctx, myPrivateSend );
+
         /* Associate the created CyaSSL object with the connected socket. */
         if( CyaSSL_set_fd( xCyaSSL_Object, conn->sock_fd ) != SSL_SUCCESS )
         {
@@ -101,19 +175,20 @@ inline static void print_usage( void )
 
 inline static void DIE( const char msg[], CYASSL* cyaSSLObject )
 {
-    char buffer[ 256 ];
+    char* err_buffer        = 0;
+    char buffer[ 256 ]      = { '\0' };
 
     int err = errno;
 
-    printf( "exiting: %s\n", msg );
-    strerror_r( err, buffer, sizeof( buffer ) );
-    printf( "errno: %s\n", buffer );
+    debug_fmt( "exiting: %s", msg );
+    err_buffer = strerror( err );
+    debug_fmt( "errno: %s", err_buffer );
 
     if( cyaSSLObject != 0 )
     {
         int cyaErr = CyaSSL_get_error( cyaSSLObject, 0 );
         CyaSSL_ERR_error_string( cyaErr, buffer );
-        printf( "CyaSSLErr: %d -> %s\n", cyaErr, buffer );
+        debug_fmt( "CyaSSLErr: %d -> %s", cyaErr, buffer );
     }
 
     exit( -1 );
@@ -123,7 +198,7 @@ inline static CYASSL* closeSSL( CYASSL* cyaSSLObject, Conn_t* conn )
 {
     if( shutdown( conn->sock_fd, SHUT_RDWR ) < 0 )
     {
-        printf( "Shutdown failed...\n" );
+        debug_log( "Shutdown failed..." );
     }
 
     close( conn->sock_fd );
@@ -212,6 +287,8 @@ static int main_handle(
     static size_t   data_sent           = 0;
     static size_t   data_recv           = 0;
     static char     recv_buffer[ 256 ]  = { '\0' };
+    int valopt                          = 0;
+    socklen_t lon                       = sizeof( int );
 
     BEGIN_CORO( *cs )
 
@@ -226,9 +303,30 @@ static int main_handle(
         }
     }
 
-    printf( "Connecting...\n" );
+    debug_log( "Connecting..." );
+    int errval = errno;
+
+    if( errval != EINPROGRESS )
+    {
+        debug_log( "Connection failed" );
+        return -1;
+    }
+
     YIELD( *cs, ( int ) WANT_WRITE );
-    printf( "Connected! state = %d \n", state );
+
+    if( getsockopt( conn->sock_fd, SOL_SOCKET, SO_ERROR, ( void* )( &valopt ), &lon ) < 0 )
+    {
+        debug_fmt( "Error while getsockopt %s", strerror( errno ) );
+        return -1;
+    }
+
+    if ( valopt )
+    {
+         debug_fmt( "Error while connecting %s", strerror( valopt ) );
+         return -1;
+    }
+
+    debug_fmt( "Connected! state = %d", state );
 
     // part two is actually to do the ssl handshake
     {
@@ -244,11 +342,11 @@ static int main_handle(
                 YIELD( *cs, ( int ) WANT_WRITE );
             }
 
-            printf( "Connecting SSL...\n" );
+            debug_log( "Connecting SSL..." );
             int ret = CyaSSL_connect( cya_obj );
 
             state = ret <= 0 ? CyaSSL_get_error( cya_obj, ret ) : ret;
-            printf( "Connecting SSL state [%d][%d][%d]\n", state, ret, ( int ) SSL_SUCCESS );
+            debug_fmt( "Connecting SSL state [%d][%d][%d]", state, ret, ( int ) SSL_SUCCESS );
 
         } while( state != SSL_SUCCESS && ( state == SSL_ERROR_WANT_READ || state == SSL_ERROR_WANT_WRITE ) );
 
@@ -281,10 +379,10 @@ static int main_handle(
                 size_t offset       = data_sent;
                 size_t size_left    = data_size - data_sent;
 
-                printf( "Sending SSL... data_size = [%zu], data_sent = [%zu]\n", data_size, data_sent );
+                debug_fmt( "Sending SSL... data_size = [%zu], data_sent = [%zu]", data_size, data_sent );
                 int ret             = CyaSSL_write( cya_obj, data + offset, size_left );
                 state               = ret <= 0 ? CyaSSL_get_error( cya_obj, ret ) : SSL_SUCCESS;
-                printf( "Sending SSL state state = [%d], ret = [%d]\n", state, ret );
+                debug_fmt( "Sending SSL state state = [%d], ret = [%d]", state, ret );
 
                 if( ret > 0 ) { data_sent += ret; }
             } while( data_sent < data_size && state == SSL_SUCCESS );
@@ -292,7 +390,7 @@ static int main_handle(
 
         if( state != SSL_SUCCESS )
         {
-            printf( "Exiting\n" );
+            debug_log( "Exiting" );
             EXIT( *cs, -1 );
         }
     }
@@ -319,8 +417,8 @@ static int main_handle(
                 if( ret > 0 )
                 {
                     recv_buffer[ ret ] = '\0';
-                    printf( "<<<%s>>>", recv_buffer );
-                    printf( "Received SSL... size = [%d], state = [%d]\n", ret, state );
+                    debug_fmt( "<<<%s>>>", recv_buffer );
+                    debug_fmt( "Received SSL... size = [%d], state = [%d]", ret, state );
                     data_recv = ret;
                 }
             } while( data_recv == sizeof( recv_buffer ) - 1 && state == SSL_SUCCESS );
@@ -413,9 +511,9 @@ int main( const int argc, const char** argv )
     // almost endless loop
     for( ; ; )
     {
-        printf( "main_handle...\n" );
+        debug_log( "main_handle..." );
         int ret = main_handle( &cs, cyaSSLObject, &conn_desc, data, data_size );
-        printf( "main_handle done!\n" );
+        debug_log( "main_handle done!" );
 
         if( ret == -1 ) DIE( "error on main_handle...", cyaSSLObject );
         if( ret ==  0 ) break;
@@ -425,7 +523,7 @@ int main( const int argc, const char** argv )
         memcpy( &r_working_set, &r_master_set, sizeof( fd_set ) );
         memcpy( &w_working_set, &w_master_set, sizeof( fd_set ) );
 
-        printf( "select... [%d]\n", ( int ) wanted_event );
+        debug_fmt( "select... [%d]", ( int ) wanted_event );
 
         int s_ret = select(
                   max_fd + 1
@@ -434,7 +532,7 @@ int main( const int argc, const char** argv )
                 , NULL
                 , &timeout );
 
-        printf( "select done [%d]\n", s_ret );
+        debug_fmt( "select done [%d]", s_ret );
 
         if( s_ret < 0 )     DIE( "error on select...", cyaSSLObject );
         if( s_ret == 0 )    DIE( "timeout on select...", cyaSSLObject );
