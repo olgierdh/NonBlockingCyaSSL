@@ -11,6 +11,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include "debug.h"
+
 /**
  * \struct SSLCertConfig_t
  * \brief  This structure shall hold data related via the loading function
@@ -36,7 +38,6 @@ CYASSL_CTX* init_cyaSSL( void );
 int load_certificate( CYASSL_CTX* cya_ctx, const SSLCertConfig_t* cert_config );
 CYASSL* connectSSL( CYASSL_CTX* cya_ctx, const Conn_t* conn );
 void print_usage( void );
-void __attribute__((noreturn)) DIE( const char msg[], CYASSL* cyaSSLObject );
 CYASSL* closeSSL( CYASSL* cyaSSLObject, Conn_t* conn );
 char* load_file_into_memory( const char* filename, size_t* size );
 
@@ -113,21 +114,22 @@ void print_usage( void )
     printf( "Usage: example_01 <server_ip> <port> <filename>\n" );
 }
 
-void DIE( const char msg[], CYASSL* cyaSSLObject )
+inline static void DIE( const char msg[], CYASSL* cyaSSLObject )
 {
-    char buffer[ 256 ];
+    char* err_buffer        = 0;
+    char buffer[ 256 ]      = { '\0' };
 
     int err = errno;
 
-    printf( "exiting: %s\n", msg );
-    strerror_r( err, buffer, sizeof( buffer ) );
-    printf( "errno: %s\n", buffer );
+    debug_fmt( "exiting: %s", msg );
+    err_buffer = strerror( err );
+    debug_fmt( "errno: %s", err_buffer );
 
     if( cyaSSLObject != 0 )
     {
         int cyaErr = CyaSSL_get_error( cyaSSLObject, 0 );
         CyaSSL_ERR_error_string( cyaErr, buffer );
-        printf( "CyaSSLErr: %d -> %s\n", cyaErr, buffer );
+        debug_fmt( "CyaSSLErr: %d -> %s", cyaErr, buffer );
     }
 
     exit( -1 );
